@@ -59,6 +59,7 @@ private:
     QVector<QPointF> offsetPathToRightLane(const QVector<QPointF>& centerPath) const;
     void activateGoalRoute();
     void sendExternalAlgorithmTelemetry(qint64 now);
+    void updateExternalGoalProgress();
     void updatePathFollowing();
     bool hasBlockingObstacle() const;
     QString controlModeName() const;

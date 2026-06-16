@@ -281,6 +281,9 @@ void MainWindow::tick() {
         if (!braking_ && routeFollowingEnabled_ && controlMode_ == ControlMode::InternalAuto) {
             updatePathFollowing();
         }
+        if (controlMode_ == ControlMode::ExternalTcp) {
+            updateExternalGoalProgress();
+        }
 
         vehicle_.update(dt);
         const VehicleState state = vehicle_.state();
@@ -486,6 +489,39 @@ void MainWindow::sendExternalAlgorithmTelemetry(qint64 now) {
     packet["goals"] = goals;
     packet["active_goal_index"] = activeGoalIndex_;
     tcpServer_.sendJson(packet);
+}
+
+void MainWindow::updateExternalGoalProgress() {
+    if (activeGoalIndex_ < 0 || activeGoalIndex_ >= navigationGoals_.size()) {
+        return;
+    }
+
+    const VehicleState state = vehicle_.state();
+    const QPointF goal = navigationGoals_.at(activeGoalIndex_);
+    const double dx = goal.x() - state.x;
+    const double dy = goal.y() - state.y;
+    if (dx * dx + dy * dy > 9.0) {
+        return;
+    }
+
+    appendLog(QString("external route arrived: target %1/%2")
+        .arg(activeGoalIndex_ + 1)
+        .arg(navigationGoals_.size()));
+    logDatabase_.insertEvent(
+        "EXTERNAL_ROUTE_ARRIVED",
+        QString("target=%1 goals=%2").arg(activeGoalIndex_ + 1).arg(navigationGoals_.size()));
+
+    ++activeGoalIndex_;
+    if (activeGoalIndex_ < navigationGoals_.size()) {
+        activateGoalRoute();
+        return;
+    }
+
+    routeFollowingEnabled_ = false;
+    DataManager::instance().setNavigationPath({}, navigationGoals_);
+    vehicle_.setControl(0.0, state.steering);
+    appendLog("external route complete: all queued goals reached");
+    logDatabase_.insertEvent("EXTERNAL_ROUTE_COMPLETE", "all queued goals reached");
 }
 
 void MainWindow::clearVirtualObstacles() {
