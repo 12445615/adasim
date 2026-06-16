@@ -22,6 +22,20 @@ bool TcpControlServer::isListening() const {
     return server_.isListening();
 }
 
+bool TcpControlServer::hasClient() const {
+    return socket_ && socket_->state() == QAbstractSocket::ConnectedState;
+}
+
+void TcpControlServer::sendJson(const QJsonObject& object) {
+    if (!hasClient()) {
+        return;
+    }
+
+    socket_->write(QJsonDocument(object).toJson(QJsonDocument::Compact));
+    socket_->write("\n");
+    socket_->flush();
+}
+
 void TcpControlServer::onNewConnection() {
     if (socket_) {
         socket_->disconnectFromHost();

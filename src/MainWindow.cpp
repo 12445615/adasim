@@ -11,6 +11,7 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRandomGenerator>
@@ -296,6 +297,7 @@ void MainWindow::tick() {
             lastCanTxMs_ = now;
             canBusManager_.sendControl(state.speed, state.steering, braking_);
         }
+        sendExternalAlgorithmTelemetry(now);
         if (now - lastStateLogMs_ > config_.stateLogIntervalMs()) {
             lastStateLogMs_ = now;
             logDatabase_.insertVehicleState(
@@ -369,7 +371,6 @@ void MainWindow::setControlMode(int index) {
     }
 
     if (controlMode_ == ControlMode::ExternalTcp) {
-        routeFollowingEnabled_ = false;
         vehicle_.setControl(0.0, vehicle_.state().steering);
     }
 
@@ -438,6 +439,53 @@ void MainWindow::activateGoalRoute() {
         .arg(activeGoalIndex_ + 1)
         .arg(navigationGoals_.size())
         .arg(rightLanePath.size()));
+}
+
+void MainWindow::sendExternalAlgorithmTelemetry(qint64 now) {
+    if (controlMode_ != ControlMode::ExternalTcp || !tcpServer_.hasClient()) {
+        return;
+    }
+    if (now - lastExternalTelemetryMs_ < 50) {
+        return;
+    }
+    lastExternalTelemetryMs_ = now;
+
+    const VehicleState state = DataManager::instance().vehicleState();
+    QJsonObject vehicle;
+    vehicle["x"] = state.x;
+    vehicle["y"] = state.y;
+    vehicle["yaw"] = state.yaw;
+    vehicle["speed"] = state.speed;
+    vehicle["steering"] = state.steering;
+    vehicle["mileage"] = state.mileage;
+
+    QJsonArray path;
+    const QVector<QPointF> navigationPath = DataManager::instance().navigationPath();
+    for (const QPointF& point : navigationPath) {
+        QJsonArray item;
+        item.append(point.x());
+        item.append(point.y());
+        path.append(item);
+    }
+
+    QJsonArray goals;
+    const QVector<QPointF> navigationGoals = DataManager::instance().navigationGoals();
+    for (const QPointF& point : navigationGoals) {
+        QJsonArray item;
+        item.append(point.x());
+        item.append(point.y());
+        goals.append(item);
+    }
+
+    QJsonObject packet;
+    packet["type"] = "TELEMETRY";
+    packet["mode"] = controlModeName();
+    packet["braking"] = braking_;
+    packet["vehicle"] = vehicle;
+    packet["path"] = path;
+    packet["goals"] = goals;
+    packet["active_goal_index"] = activeGoalIndex_;
+    tcpServer_.sendJson(packet);
 }
 
 void MainWindow::clearVirtualObstacles() {

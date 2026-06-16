@@ -58,6 +58,7 @@ private:
     QVector<LidarCluster> clusterPoints(QVector<LidarPoint>& points);
     QVector<QPointF> offsetPathToRightLane(const QVector<QPointF>& centerPath) const;
     void activateGoalRoute();
+    void sendExternalAlgorithmTelemetry(qint64 now);
     void updatePathFollowing();
     bool hasBlockingObstacle() const;
     QString controlModeName() const;
@@ -98,6 +99,7 @@ private:
     ControlMode controlMode_ = ControlMode::InternalAuto;
     qint64 lastExternalLidarMs_ = 0;
     qint64 lastRecordedExternalControlLogMs_ = 0;
+    qint64 lastExternalTelemetryMs_ = 0;
     qint64 lastStateLogMs_ = 0;
     qint64 lastCanTxMs_ = 0;
     int controlPacketCount_ = 0;

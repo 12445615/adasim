@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QJsonObject>
 #include <QTcpServer>
 #include <QTcpSocket>
 
@@ -11,6 +12,8 @@ public:
     explicit TcpControlServer(QObject* parent = nullptr);
     bool start(quint16 port = 8848);
     bool isListening() const;
+    bool hasClient() const;
+    void sendJson(const QJsonObject& object);
 
 signals:
     void controlReceived(double speed, double steering);
