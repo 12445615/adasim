@@ -399,12 +399,17 @@ void MainWindow::injectVirtualObstacle(const QPointF& worldPoint) {
 }
 
 void MainWindow::planRouteToGoal(const QPointF& worldPoint) {
+    const bool hadActiveRoute = routeFollowingEnabled_ && activeGoalIndex_ < navigationGoals_.size();
     navigationGoals_.append(worldPoint);
-    if (navigationGoals_.size() == 1 || activeGoalIndex_ >= navigationGoals_.size()) {
+    if (!hadActiveRoute && (navigationGoals_.size() == 1 || activeGoalIndex_ >= navigationGoals_.size())) {
         activeGoalIndex_ = qMax(0, navigationGoals_.size() - 1);
     }
 
-    activateGoalRoute();
+    if (hadActiveRoute) {
+        DataManager::instance().setNavigationPath(DataManager::instance().navigationPath(), navigationGoals_);
+    } else {
+        activateGoalRoute();
+    }
 
     appendLog(QString("goal queued: %1 goals, active=%2, latest=(%3,%4)")
         .arg(navigationGoals_.size())
