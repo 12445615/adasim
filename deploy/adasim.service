@@ -1,0 +1,15 @@
+[Unit]
+Description=ADASim Embedded Vehicle HMI
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Environment=QT_QPA_PLATFORM=eglfs
+WorkingDirectory=/opt/adasim
+ExecStart=/opt/adasim/ADASim
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+{
+  "tcp_port": 8848,
+  "udp_lidar_port": 8850,
+  "can_interface": "vcan0",
+  "opendrive_map": "maps/demo.xodr",
+  "auto_brake_distance": 15.0,
+  "auto_brake_width": 4.0,
+  "state_log_interval_ms": 200,
+  "can_tx_interval_ms": 50
+}

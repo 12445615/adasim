@@ -1,0 +1,25 @@
+<?xml version="1.0" standalone="yes"?>
+<OpenDRIVE>
+  <header revMajor="1" revMinor="4" name="ADASimDemo" version="1.00" date="2026-06-08" north="120" south="-120" east="180" west="-80"/>
+  <road name="main_straight" length="120.0" id="1" junction="-1">
+    <planView>
+      <geometry s="0.0" x="-60.0" y="0.0" hdg="0.0" length="120.0">
+        <line/>
+      </geometry>
+    </planView>
+  </road>
+  <road name="arc_connector" length="70.0" id="2" junction="-1">
+    <planView>
+      <geometry s="0.0" x="10.0" y="-45.0" hdg="0.75" length="70.0">
+        <arc curvature="0.018"/>
+      </geometry>
+    </planView>
+  </road>
+  <road name="side_road" length="90.0" id="3" junction="-1">
+    <planView>
+      <geometry s="0.0" x="-20.0" y="-35.0" hdg="1.5707963268" length="90.0">
+        <line/>
+      </geometry>
+    </planView>
+  </road>
+</OpenDRIVE>
