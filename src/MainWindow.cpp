@@ -497,7 +497,11 @@ void MainWindow::updateExternalGoalProgress() {
     }
 
     const VehicleState state = vehicle_.state();
-    const QPointF goal = navigationGoals_.at(activeGoalIndex_);
+    const QVector<QPointF> path = DataManager::instance().navigationPath();
+    if (path.size() < 2) {
+        return;
+    }
+    const QPointF goal = path.last();
     const double dx = goal.x() - state.x;
     const double dy = goal.y() - state.y;
     if (dx * dx + dy * dy > 9.0) {
