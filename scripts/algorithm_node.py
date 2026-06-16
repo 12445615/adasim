@@ -117,17 +117,17 @@ def pure_pursuit_control(telemetry):
     alpha = wrap_angle(target_yaw - yaw)
 
     pure_pursuit = math.atan2(2.0 * WHEEL_BASE * math.sin(alpha), lookahead)
-    stanley = heading_error + math.atan2(0.75 * lateral_error, max(1.0, abs(float(vehicle.get("speed", 0.0)))))
-    steering = clamp(0.55 * pure_pursuit + 0.45 * stanley, -MAX_STEERING, MAX_STEERING)
+    correction = math.atan2(0.25 * lateral_error, max(1.0, abs(float(vehicle.get("speed", 0.0)))))
+    steering = clamp(pure_pursuit + 0.35 * heading_error + correction, -MAX_STEERING, MAX_STEERING)
 
     tracking_error = abs(heading_error) + min(abs(lateral_error) * 0.18, 0.8)
     speed = MAX_SPEED * (1.0 - min(tracking_error, 1.4) / 1.9)
     speed = clamp(speed, 0.8, MAX_SPEED)
     if abs(heading_error) > 1.35 or abs(lateral_error) > 6.0:
         speed = 0.6
-        steering = clamp(heading_error + math.atan2(lateral_error, 3.0), -MAX_STEERING, MAX_STEERING)
+        steering = clamp(pure_pursuit + 0.5 * heading_error + correction, -MAX_STEERING, MAX_STEERING)
 
-    return speed, -steering, "tracking", lateral_error, heading_error
+    return speed, steering, "tracking", lateral_error, heading_error
 
 
 def send_control(sock, speed, steering, status):
