@@ -5,6 +5,22 @@
 #include <QSqlQuery>
 #include <QVariant>
 
+namespace {
+bool columnExists(QSqlDatabase& db, const QString& table, const QString& column) {
+    QSqlQuery query(db);
+    if (!query.exec(QString("PRAGMA table_info(%1)").arg(table))) {
+        return false;
+    }
+
+    while (query.next()) {
+        if (query.value(1).toString() == column) {
+            return true;
+        }
+    }
+    return false;
+}
+}
+
 bool LogDatabase::open(const QString& path) {
     if (QSqlDatabase::contains("adasim_log")) {
         db_ = QSqlDatabase::database("adasim_log");
@@ -50,7 +66,9 @@ bool LogDatabase::initTables() {
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "timestamp_ms INTEGER,"
         "speed REAL,"
-        "steering REAL)");
+        "steering REAL,"
+        "source TEXT,"
+        "applied INTEGER)");
 
     const bool eventOk = query.exec(
         "CREATE TABLE IF NOT EXISTS event_log ("
@@ -58,6 +76,15 @@ bool LogDatabase::initTables() {
         "timestamp_ms INTEGER,"
         "type TEXT,"
         "detail TEXT)");
+
+    if (!columnExists(db_, "control_packet", "source")) {
+        QSqlQuery alter(db_);
+        alter.exec("ALTER TABLE control_packet ADD COLUMN source TEXT");
+    }
+    if (!columnExists(db_, "control_packet", "applied")) {
+        QSqlQuery alter(db_);
+        alter.exec("ALTER TABLE control_packet ADD COLUMN applied INTEGER DEFAULT 1");
+    }
 
     return vehicleOk && controlOk && eventOk;
 }
@@ -85,16 +112,18 @@ void LogDatabase::insertVehicleState(const VehicleState& state, int pointCount, 
     query.exec();
 }
 
-void LogDatabase::insertControl(double speed, double steering) {
+void LogDatabase::insertControl(double speed, double steering, const QString& source, bool applied) {
     if (!db_.isOpen()) {
         return;
     }
 
     QSqlQuery query(db_);
-    query.prepare("INSERT INTO control_packet (timestamp_ms,speed,steering) VALUES (?,?,?)");
+    query.prepare("INSERT INTO control_packet (timestamp_ms,speed,steering,source,applied) VALUES (?,?,?,?,?)");
     query.addBindValue(QDateTime::currentMSecsSinceEpoch());
     query.addBindValue(speed);
     query.addBindValue(steering);
+    query.addBindValue(source);
+    query.addBindValue(applied ? 1 : 0);
     query.exec();
 }
 

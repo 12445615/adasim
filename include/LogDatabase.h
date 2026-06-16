@@ -12,7 +12,7 @@ public:
     bool isOpen() const;
 
     void insertVehicleState(const VehicleState& state, int pointCount, int clusterCount, bool braking);
-    void insertControl(double speed, double steering);
+    void insertControl(double speed, double steering, const QString& source = "UNKNOWN", bool applied = true);
     void insertEvent(const QString& type, const QString& detail);
 
 private:

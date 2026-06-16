@@ -11,6 +11,7 @@
 #include "LogDatabase.h"
 
 #include <QElapsedTimer>
+#include <QComboBox>
 #include <QLabel>
 #include <QMainWindow>
 #include <QPushButton>
@@ -40,8 +41,15 @@ private slots:
     void clearVirtualObstacles();
     void applyExternalLidar(const QVector<LidarPoint>& points);
     void chooseOpenDriveMap();
+    void setControlMode(int index);
 
 private:
+    enum class ControlMode {
+        InternalAuto,
+        ExternalTcp,
+        Replay
+    };
+
     void buildUi();
     void loadOpenDriveMap(const QString& selectedPath = QString());
     void updateTelemetry(double dt);
@@ -52,6 +60,7 @@ private:
     void activateGoalRoute();
     void updatePathFollowing();
     bool hasBlockingObstacle() const;
+    QString controlModeName() const;
 
     AppConfig config_;
     OpenDriveMap openDriveMap_;
@@ -73,6 +82,7 @@ private:
     QLabel* packetCountLabel_ = nullptr;
     QLabel* replayCountLabel_ = nullptr;
     QLabel* statusLabel_ = nullptr;
+    QComboBox* controlModeCombo_ = nullptr;
     QTextEdit* logEdit_ = nullptr;
     QSlider* replaySlider_ = nullptr;
     QPushButton* startButton_ = nullptr;
@@ -85,7 +95,9 @@ private:
     bool braking_ = false;
     bool externalLidarActive_ = false;
     bool routeFollowingEnabled_ = false;
+    ControlMode controlMode_ = ControlMode::InternalAuto;
     qint64 lastExternalLidarMs_ = 0;
+    qint64 lastRecordedExternalControlLogMs_ = 0;
     qint64 lastStateLogMs_ = 0;
     qint64 lastCanTxMs_ = 0;
     int controlPacketCount_ = 0;

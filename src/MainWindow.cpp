@@ -76,12 +76,17 @@ void MainWindow::buildUi() {
     pauseButton_ = new QPushButton("暂停");
     auto* resetButton = new QPushButton("重置");
     auto* clearObstacleButton = new QPushButton("清空障碍物");
+    controlModeCombo_ = new QComboBox();
+    controlModeCombo_->addItems({"Internal Auto", "External TCP", "Replay"});
     statusLabel_ = new QLabel("算法状态: 就绪 | TCP:8848");
     topBar->addWidget(startButton_);
     topBar->addWidget(pauseButton_);
     topBar->addWidget(resetButton);
     topBar->addWidget(clearObstacleButton);
     topBar->addWidget(loadMapButton);
+    topBar->addSpacing(10);
+    topBar->addWidget(new QLabel("Control Source:"));
+    topBar->addWidget(controlModeCombo_);
     topBar->addStretch();
     topBar->addWidget(statusLabel_);
     rootLayout->addLayout(topBar);
@@ -114,9 +119,11 @@ void MainWindow::buildUi() {
 
     auto* algoBox = new QGroupBox("算法与通信");
     auto* algoLayout = new QVBoxLayout(algoBox);
-    algoLayout->addWidget(new QLabel("Python 节点: TCP JSON 控制"));
+    algoLayout->addWidget(new QLabel("Internal Auto: Qt 内置规划器控制车辆"));
+    algoLayout->addWidget(new QLabel("External TCP: Python 节点输出 speed/steering"));
+    algoLayout->addWidget(new QLabel("Replay: SQLite/缓冲区历史帧复盘"));
     algoLayout->addWidget(new QLabel("感知模块: BFS 欧式聚类"));
-    algoLayout->addWidget(new QLabel("控制模块: PID/MPC 接口预留"));
+    algoLayout->addWidget(new QLabel("AB 测试: 同场景替换 PID/MPC/Pure Pursuit"));
     rightLayout->addWidget(algoBox);
 
     auto* splitter = new QSplitter();
@@ -162,6 +169,7 @@ void MainWindow::buildUi() {
     connect(resetButton, &QPushButton::clicked, this, &MainWindow::resetSimulation);
     connect(clearObstacleButton, &QPushButton::clicked, this, &MainWindow::clearVirtualObstacles);
     connect(loadMapButton, &QPushButton::clicked, this, &MainWindow::chooseOpenDriveMap);
+    connect(controlModeCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::setControlMode);
     connect(replaySlider_, &QSlider::valueChanged, this, &MainWindow::replayChanged);
 }
 
@@ -215,10 +223,13 @@ void MainWindow::chooseOpenDriveMap() {
 }
 
 void MainWindow::startSimulation() {
+    if (controlMode_ == ControlMode::Replay) {
+        setControlMode(static_cast<int>(ControlMode::InternalAuto));
+    }
     running_ = true;
     replaying_ = false;
     replaySlider_->setValue(100);
-    appendLog("simulation started");
+    appendLog(QString("simulation started, control source=%1").arg(controlModeName()));
 }
 
 void MainWindow::pauseSimulation() {
@@ -237,6 +248,10 @@ void MainWindow::resetSimulation() {
     routePathIndex_ = 1;
     activeGoalIndex_ = 0;
     navigationGoals_.clear();
+    controlMode_ = ControlMode::InternalAuto;
+    if (controlModeCombo_) {
+        controlModeCombo_->setCurrentIndex(static_cast<int>(controlMode_));
+    }
     DataManager::instance().reset();
     DataManager::instance().setVehicleState(vehicle_.state());
     replaySlider_->setValue(100);
@@ -247,7 +262,7 @@ void MainWindow::resetSimulation() {
 
 void MainWindow::tick() {
     const double dt = qMax(0.001, elapsed_.restart() / 1000.0);
-    if (running_ && !replaying_) {
+    if (running_ && !replaying_ && controlMode_ != ControlMode::Replay) {
         if (hasBlockingObstacle()) {
             const VehicleState state = vehicle_.state();
             vehicle_.setControl(0.0, state.steering);
@@ -262,7 +277,7 @@ void MainWindow::tick() {
             logDatabase_.insertEvent("AUTO_BRAKE_RELEASE", "front safety zone cleared");
         }
 
-        if (!braking_ && routeFollowingEnabled_) {
+        if (!braking_ && routeFollowingEnabled_ && controlMode_ == ControlMode::InternalAuto) {
             updatePathFollowing();
         }
 
@@ -298,8 +313,19 @@ void MainWindow::tick() {
 
 void MainWindow::applyControl(double speed, double steering) {
     ++controlPacketCount_;
-    vehicle_.setControl(speed, steering);
-    logDatabase_.insertControl(speed, steering);
+    const bool applied = controlMode_ == ControlMode::ExternalTcp && !replaying_;
+    if (applied) {
+        vehicle_.setControl(speed, steering);
+    }
+    logDatabase_.insertControl(speed, steering, "External TCP", applied);
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (!applied && now - lastRecordedExternalControlLogMs_ > 1000) {
+        lastRecordedExternalControlLogMs_ = now;
+        appendLog(QString("external control recorded only: mode=%1 speed=%2 steering=%3")
+            .arg(controlModeName())
+            .arg(speed, 0, 'f', 2)
+            .arg(steering, 0, 'f', 3));
+    }
 }
 
 void MainWindow::appendLog(const QString& message) {
@@ -315,9 +341,40 @@ void MainWindow::replayChanged(int value) {
         replaying_ = false;
         return;
     }
+    if (controlMode_ != ControlMode::Replay) {
+        setControlMode(static_cast<int>(ControlMode::Replay));
+    }
     replaying_ = true;
     running_ = false;
     replay_.restoreByPercent(value);
+}
+
+void MainWindow::setControlMode(int index) {
+    const ControlMode nextMode = static_cast<ControlMode>(qBound(0, index, 2));
+    if (controlMode_ == nextMode) {
+        return;
+    }
+
+    controlMode_ = nextMode;
+    if (controlModeCombo_ && controlModeCombo_->currentIndex() != index) {
+        controlModeCombo_->setCurrentIndex(index);
+    }
+
+    if (controlMode_ == ControlMode::Replay) {
+        running_ = false;
+        replaying_ = true;
+    } else {
+        replaying_ = false;
+        replaySlider_->setValue(100);
+    }
+
+    if (controlMode_ == ControlMode::ExternalTcp) {
+        routeFollowingEnabled_ = false;
+        vehicle_.setControl(0.0, vehicle_.state().steering);
+    }
+
+    appendLog(QString("control source switched: %1").arg(controlModeName()));
+    logDatabase_.insertEvent("CONTROL_MODE", controlModeName());
 }
 
 void MainWindow::injectVirtualObstacle(const QPointF& worldPoint) {
@@ -412,9 +469,24 @@ void MainWindow::updateTelemetry(double dt) {
     clusterCountLabel_->setText(QString("聚类: %1").arg(DataManager::instance().clusters().size()));
     packetCountLabel_->setText(QString("报文: %1").arg(controlPacketCount_));
     replayCountLabel_->setText(QString("回放帧: %1").arg(replay_.size()));
-    statusLabel_->setText(braking_
-        ? "算法状态: 障碍物制动 | TCP:8848"
-        : "算法状态: 就绪 | TCP:8848");
+    const QString tcpState = tcpServer_.isListening() ? "TCP:8848 listening" : "TCP offline";
+    const QString controlState = braking_ ? "障碍物制动" : "就绪";
+    statusLabel_->setText(QString("模式: %1 | 状态: %2 | %3")
+        .arg(controlModeName())
+        .arg(controlState)
+        .arg(tcpState));
+}
+
+QString MainWindow::controlModeName() const {
+    switch (controlMode_) {
+    case ControlMode::InternalAuto:
+        return "Internal Auto";
+    case ControlMode::ExternalTcp:
+        return "External TCP";
+    case ControlMode::Replay:
+        return "Replay";
+    }
+    return "Unknown";
 }
 
 void MainWindow::generateLidar() {
