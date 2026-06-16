@@ -6,9 +6,10 @@ import time
 
 HOST = "127.0.0.1"
 PORT = 8848
-WHEEL_BASE = 1.35
-MAX_STEERING = 1.0
-MAX_SPEED = 3.2
+
+
+def clamp(value, low, high):
+    return max(low, min(high, value))
 
 
 def wrap_angle(angle):
@@ -25,58 +26,46 @@ def distance2(a, b):
     return dx * dx + dy * dy
 
 
-def clamp(value, low, high):
-    return max(low, min(high, value))
+def nearest_path_segment(position, path, last_index):
+    segment_count = len(path) - 1
+    search_start = clamp(last_index - 1, 0, max(0, segment_count - 1))
+    search_end = min(segment_count - 1, search_start + 8)
 
+    nearest_segment = search_start
+    nearest_t = 0.0
+    nearest_distance2 = float("inf")
 
-def project_to_path(position, path):
-    best = {
-        "segment": 0,
-        "point": path[0],
-        "distance2": distance2(position, path[0]),
-        "t": 0.0,
-        "signed_error": 0.0,
-        "heading": 0.0,
-    }
-
-    for i in range(len(path) - 1):
+    for i in range(search_start, search_end + 1):
         ax, ay = path[i]
         bx, by = path[i + 1]
-        vx = bx - ax
-        vy = by - ay
-        length2 = vx * vx + vy * vy
+        abx = bx - ax
+        aby = by - ay
+        length2 = abx * abx + aby * aby
         if length2 < 1e-6:
             continue
 
-        wx = position[0] - ax
-        wy = position[1] - ay
-        t = clamp((wx * vx + wy * vy) / length2, 0.0, 1.0)
-        px = ax + vx * t
-        py = ay + vy * t
-        dx = position[0] - px
-        dy = position[1] - py
-        d2 = dx * dx + dy * dy
-        if d2 < best["distance2"]:
-            cross = vx * (position[1] - ay) - vy * (position[0] - ax)
-            sign = 1.0 if cross > 0.0 else -1.0
-            best = {
-                "segment": i,
-                "point": (px, py),
-                "distance2": d2,
-                "t": t,
-                "signed_error": sign * math.sqrt(d2),
-                "heading": math.atan2(vy, vx),
-            }
+        apx = position[0] - ax
+        apy = position[1] - ay
+        t = clamp((apx * abx + apy * aby) / length2, 0.0, 1.0)
+        px = ax + abx * t
+        py = ay + aby * t
+        d2 = (px - position[0]) * (px - position[0]) + (py - position[1]) * (py - position[1])
+        if d2 < nearest_distance2:
+            nearest_distance2 = d2
+            nearest_segment = i
+            nearest_t = t
 
-    return best
+    return nearest_segment, nearest_t, nearest_distance2
 
 
-def choose_lookahead_point(path, projection, lookahead):
-    current = projection["point"]
-    remaining = lookahead
-    start = projection["segment"]
+def lookahead_point(path, nearest_segment, nearest_t, distance):
+    current = (
+        path[nearest_segment][0] + (path[nearest_segment + 1][0] - path[nearest_segment][0]) * nearest_t,
+        path[nearest_segment][1] + (path[nearest_segment + 1][1] - path[nearest_segment][1]) * nearest_t,
+    )
 
-    for i in range(start, len(path) - 1):
+    remaining = distance
+    for i in range(nearest_segment, len(path) - 1):
         end = path[i + 1]
         seg_len = math.hypot(end[0] - current[0], end[1] - current[1])
         if seg_len >= remaining and seg_len > 1e-6:
@@ -91,49 +80,56 @@ def choose_lookahead_point(path, projection, lookahead):
     return path[-1]
 
 
-def pure_pursuit_control(telemetry):
-    vehicle = telemetry.get("vehicle", {})
-    path = telemetry.get("path", [])
-    if len(path) < 2:
-        return 0.0, 0.0, "waiting_path", 0.0, 0.0
+class InternalStyleController:
+    def __init__(self):
+        self.route_path_index = 1
 
-    x = float(vehicle.get("x", 0.0))
-    y = float(vehicle.get("y", 0.0))
-    yaw = float(vehicle.get("yaw", 0.0))
-    position = (x, y)
+    def reset_if_path_changed(self, telemetry):
+        active_goal_index = telemetry.get("active_goal_index", 0)
+        path_size = len(telemetry.get("path", []))
+        key = (active_goal_index, path_size)
+        if getattr(self, "_path_key", None) != key:
+            self._path_key = key
+            self.route_path_index = 1
 
-    goal = path[-1]
-    goal_distance = math.sqrt(distance2(position, goal))
-    if goal_distance < 2.5:
-        return 0.0, 0.0, "arrived", 0.0, 0.0
+    def control(self, telemetry):
+        self.reset_if_path_changed(telemetry)
 
-    projection = project_to_path(position, path)
-    lateral_error = projection["signed_error"]
-    heading_error = wrap_angle(projection["heading"] - yaw)
+        vehicle = telemetry.get("vehicle", {})
+        path = telemetry.get("path", [])
+        if len(path) < 2:
+            return 0.0, 0.0, "waiting_path", 0.0
 
-    lookahead = clamp(3.5 + abs(float(vehicle.get("speed", 0.0))) * 0.35, 3.5, 7.0)
-    target = choose_lookahead_point(path, projection, lookahead)
-    target_yaw = math.atan2(target[1] - y, target[0] - x)
-    alpha = wrap_angle(target_yaw - yaw)
+        x = float(vehicle.get("x", 0.0))
+        y = float(vehicle.get("y", 0.0))
+        yaw = float(vehicle.get("yaw", 0.0))
+        position = (x, y)
 
-    pure_pursuit = math.atan2(2.0 * WHEEL_BASE * math.sin(alpha), lookahead)
-    correction = math.atan2(0.25 * lateral_error, max(1.0, abs(float(vehicle.get("speed", 0.0)))))
-    steering = clamp(pure_pursuit + 0.35 * heading_error + correction, -MAX_STEERING, MAX_STEERING)
+        nearest_segment, nearest_t, nearest_d2 = nearest_path_segment(position, path, self.route_path_index)
+        self.route_path_index = max(self.route_path_index, nearest_segment + 1)
 
-    tracking_error = abs(heading_error) + min(abs(lateral_error) * 0.18, 0.8)
-    speed = MAX_SPEED * (1.0 - min(tracking_error, 1.4) / 1.9)
-    speed = clamp(speed, 0.8, MAX_SPEED)
-    if abs(heading_error) > 1.35 or abs(lateral_error) > 6.0:
-        speed = 0.6
-        steering = clamp(pure_pursuit + 0.5 * heading_error + correction, -MAX_STEERING, MAX_STEERING)
+        target = lookahead_point(path, nearest_segment, nearest_t, 6.0)
+        target_yaw = math.atan2(target[1] - y, target[0] - x)
+        yaw_error = wrap_angle(target_yaw - yaw)
 
-    return speed, steering, "tracking", lateral_error, heading_error
+        if abs(yaw_error) > 1.15:
+            steering = 1.25 if yaw_error > 0.0 else -1.25
+            return 0.0, steering, "aligning", math.sqrt(nearest_d2)
+
+        steering = clamp(yaw_error * 1.65, -1.15, 1.15)
+        speed = max(1.8, 4.5 * (1.0 - min(abs(yaw_error), 1.2) / 1.8))
+
+        goal = path[-1]
+        if distance2(goal, position) < 9.0:
+            return 0.0, steering, "arrived", math.sqrt(nearest_d2)
+
+        return speed, steering, "tracking", math.sqrt(nearest_d2)
 
 
 def send_control(sock, speed, steering, status):
     packet = {
         "type": "CONTROL_KINEMATIC",
-        "algorithm": "pure_pursuit",
+        "algorithm": "internal_style_python",
         "status": status,
         "speed": speed,
         "steering": steering,
@@ -142,6 +138,7 @@ def send_control(sock, speed, steering, status):
 
 
 def run_client():
+    controller = InternalStyleController()
     with socket.create_connection((HOST, PORT), timeout=3) as sock:
         print(f"connected to ADASim at {HOST}:{PORT}")
         file = sock.makefile("r", encoding="utf-8")
@@ -157,16 +154,16 @@ def run_client():
             if packet.get("type") != "TELEMETRY":
                 continue
 
-            speed, steering, status, lateral_error, heading_error = pure_pursuit_control(packet)
+            speed, steering, status, path_error = controller.control(packet)
             send_control(sock, speed, steering, status)
 
             now = time.time()
             if now - last_print > 1.0:
                 last_print = now
-                path_size = len(packet.get("path", []))
                 print(
-                    f"{status}: path={path_size} speed={speed:.2f} steering={steering:.3f} "
-                    f"cte={lateral_error:.2f} heading={heading_error:.2f}"
+                    f"{status}: goal={packet.get('active_goal_index', 0) + 1} "
+                    f"path={len(packet.get('path', []))} speed={speed:.2f} "
+                    f"steering={steering:.3f} path_error={path_error:.2f}"
                 )
 
 
