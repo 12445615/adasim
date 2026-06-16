@@ -127,7 +127,7 @@ def pure_pursuit_control(telemetry):
         speed = 0.6
         steering = clamp(heading_error + math.atan2(lateral_error, 3.0), -MAX_STEERING, MAX_STEERING)
 
-    return speed, steering, "tracking", lateral_error, heading_error
+    return speed, -steering, "tracking", lateral_error, heading_error
 
 
 def send_control(sock, speed, steering, status):
