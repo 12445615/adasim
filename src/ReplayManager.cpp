@@ -4,6 +4,11 @@ ReplayManager::ReplayManager(QObject* parent)
     : QObject(parent) {}
 
 void ReplayManager::record(const FrameSnapshot& snapshot) {
+    if (lastRecordTimestampMs_ > 0 && snapshot.timestampMs - lastRecordTimestampMs_ < recordIntervalMs_) {
+        return;
+    }
+
+    lastRecordTimestampMs_ = snapshot.timestampMs;
     buffer_.append(snapshot);
     if (buffer_.size() > maxFrames_) {
         buffer_.remove(0, buffer_.size() - maxFrames_);
@@ -32,4 +37,5 @@ bool ReplayManager::restoreByPercent(int percent) {
 
 void ReplayManager::clear() {
     buffer_.clear();
+    lastRecordTimestampMs_ = 0;
 }

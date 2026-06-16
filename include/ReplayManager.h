@@ -22,5 +22,7 @@ signals:
 
 private:
     QVector<FrameSnapshot> buffer_;
-    int maxFrames_ = 600;
+    qint64 lastRecordTimestampMs_ = 0;
+    int maxFrames_ = 1800;
+    int recordIntervalMs_ = 100;
 };
